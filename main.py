@@ -26,78 +26,86 @@ load_dotenv()
 LOGIN = os.getenv("LOGIN")
 
 def main():
-    st.set_page_config(
-    page_title="DirChat",
-    page_icon=":books:")
-
+    st.set_page_config(page_title="DirChat", page_icon=":books:")
     st.title("_Private Data :red[QA Chat]_ :books:")
 
-    if "conversation" not in st.session_state:
-        st.session_state.conversation = None
-
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = None
-
-    if "processComplete" not in st.session_state:
-        st.session_state.processComplete = None
+    initialize_state()
 
     with st.sidebar:
-        uploaded_files =  st.file_uploader("Upload your file",type=['pdf','docx'],accept_multiple_files=True)
+        uploaded_files = st.file_uploader("Upload your file", type=['pdf', 'docx'], accept_multiple_files=True)
         login_key = st.text_input("Login", key="chatbot_login", type="password")
         login = st.button("Login")
+
     if login:
-        with st.spinner("Loading..."):
-            if not login_key:
-                with st.sidebar:
-                    st.info("Please Login to continue.")
-                    st.stop()
-            elif not login_key == LOGIN:
-                with st.sidebar:
-                    st.info("Passwords do not match.")
-                    st.stop()
-            files_text = get_text(uploaded_files)
-            text_chunks = get_text_chunks(files_text)
-            vetorestore = get_vectorstore(text_chunks)
-    
-            st.session_state.conversation = get_conversation_chain(vetorestore) 
+        process_login(uploaded_files, login_key)
+    elif st.session_state.processComplete:
+        process_chat()
+    else:
+        st.info("파일 업로드 후 로그인을 먼저 진행해주세요.")
 
-            st.session_state.processComplete = True
-
+def initialize_state():
+    if "conversation" not in st.session_state:
+        st.session_state.conversation = None
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = None
+    if "processComplete" not in st.session_state:
+        st.session_state.processComplete = None
     if 'messages' not in st.session_state:
-        st.session_state['messages'] = [{"role": "assistant", 
-                                        "content": "안녕하세요! 주어진 문서에 대해 궁금하신 것이 있으면 언제든 물어봐주세요!"}]
+        st.session_state['messages'] = [{"role": "assistant", "content": "안녕하세요! 주어진 문서에 대해 궁금하신 것이 있으면 언제든 물어봐주세요!"}]
 
+def process_login(uploaded_files, login_key):
+    with st.spinner("Analyzing your file ..."):
+        if not validate_login(uploaded_files, login_key):
+            return
+        initialize_chat(uploaded_files)
+        process_chat()
+def process_chat():
+    display_messages()
+    handle_chat_input()
+
+def validate_login(uploaded_files, login_key):
+    if not uploaded_files:
+        st.sidebar.info("Please upload your file")
+        return False
+    if not login_key:
+        st.sidebar.info("Please Login to continue.")
+        return False
+    if login_key != LOGIN:
+        st.sidebar.info("Passwords do not match.")
+        return False
+    return True
+
+def initialize_chat(uploaded_files):
+    files_text = get_text(uploaded_files)
+    text_chunks = get_text_chunks(files_text)
+    vectorstore = get_vectorstore(text_chunks)
+    st.session_state.conversation = get_conversation_chain(vectorstore) 
+    st.session_state.processComplete = True
+
+def display_messages():
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    history = StreamlitChatMessageHistory(key="chat_messages")
-
-    # Chat logic
+def handle_chat_input():
     if query := st.chat_input("질문을 입력해주세요."):
         st.session_state.messages.append({"role": "user", "content": query})
-
         with st.chat_message("user"):
             st.markdown(query)
-
         with st.chat_message("assistant"):
             chain = st.session_state.conversation
-
             with st.spinner("Thinking..."):
                 result = chain({"question": query})
                 with get_openai_callback() as cb:
                     st.session_state.chat_history = result['chat_history']
                 response = result['answer']
                 source_documents = result['source_documents']
-
                 st.markdown(response)
                 with st.expander("참고 문서 확인"):
-                    st.markdown(source_documents[0].metadata['source'], help=f"참고 페이지: {source_documents[0].metadata['page']}\n\n{source_documents[0].page_content}")
-                    st.markdown(source_documents[1].metadata['source'], help=f"참고 페이지: {source_documents[1].metadata['page']}\n\n{source_documents[1].page_content}")
-                    st.markdown(source_documents[2].metadata['source'], help=f"참고 페이지: {source_documents[2].metadata['page']}\n\n{source_documents[2].page_content}")
+                    st.markdown(source_documents[0].metadata['source'], help=f"{source_documents[0].metadata['source']} (참고 페이지: {source_documents[0].metadata['page']})\n\n{source_documents[0].page_content}")
+                    st.markdown(source_documents[0].metadata['source'], help=f"{source_documents[1].metadata['source']} (참고 페이지: {source_documents[1].metadata['page']})\n\n{source_documents[1].page_content}")
+                    st.markdown(source_documents[0].metadata['source'], help=f"{source_documents[2].metadata['source']} (참고 페이지: {source_documents[2].metadata['page']})\n\n{source_documents[2].page_content}")
 
-
-# Add assistant message to chat history
         st.session_state.messages.append({"role": "assistant", "content": response})
 
 def tiktoken_len(text):
@@ -165,3 +173,5 @@ def get_conversation_chain(vetorestore):
 
 if __name__ == '__main__':
     main()
+
+
